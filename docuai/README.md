@@ -9,12 +9,16 @@ DocuAI is a sophisticated AI-powered document interaction and retrieval system. 
 - **Contextual Conversations**: Engage in interactive conversations with the AI, which understands the context of your documents.
 - **Source Tracking**: Get references to the source documents for each piece of information provided.
 - **Scalable Architecture**: Built with a modular and scalable design to handle growing data and user loads.
+- **Document Ingestion**: Supports direct text input, and PDF/TXT file uploads for document processing and ingestion.
+- **Chat Log Persistence**: Chat interactions are saved to MongoDB for long-term storage and audit. Session history can be retrieved via API.
 
 ## Tech Stack
 
 - **Backend**: Python (FastAPI)
 - **LLM Integration**: Langchain, OpenAI
-- **Vector Database**: ChromaDB
+- **Vector Database**: Pinecone (Used via LangChain's `PineconeVectorStore`)
+- **Chat Session Memory**: Redis (via LangChain's `RedisChatMessageHistory`)
+- **Chat Log Persistence**: MongoDB
 - **Frontend**: (To be determined - e.g., React, Vue, or Streamlit for demos)
 - **Containerization**: Docker, Docker Compose
 
@@ -71,6 +75,56 @@ These methods, often combined, provide a powerful toolkit for guiding LLM behavi
 ## Getting Started
 
 (Instructions will be added once the initial setup is complete)
+
+## API Reference
+
+This section details the main API endpoints available in DocuAI.
+
+### Core Endpoints
+
+-   **`POST /api/v1/documents/`**
+    -   **Description**: Adds a new document directly from text content. The content is stored in MongoDB, and its embedding is upserted into Pinecone.
+    -   **Request Body**: `DocumentInput` (JSON with `content: str` and optional `metadata: dict`).
+    -   **Response**: `DocumentMinimalOutput` (JSON with `doc_id` and `message`).
+
+-   **`POST /api/v1/documents/upload_file/`**
+    -   **Description**: Uploads a document file (PDF or TXT) for processing. The file's text is extracted, split into chunks, and each chunk is embedded and stored in the vector store. Each chunk is linked to a main document ID.
+    -   **Request Body**: `multipart/form-data` with a `file` field containing the PDF or TXT file.
+    -   **Response**: `FileUploadResponse` (JSON with `filename`, `message`, `total_chunks_processed`, and `document_id` for the uploaded file).
+
+-   **`GET /api/v1/documents/{doc_id}`**
+    -   **Description**: Retrieves a document's content and metadata by its ID from MongoDB. (Note: This retrieves the original document if stored whole, not individual chunks from the vector store).
+    -   **Path Parameters**: `doc_id: str`.
+    -   **Response**: `DocumentOutput` (JSON with `doc_id`, `content`, `metadata`).
+
+-   **`POST /api/v1/chat/`**
+    -   **Description**: Handles a user's chat message. It retrieves relevant document chunks from the vector store, generates an AI response using the RAG chain, stores the interaction in Redis (for session memory) and MongoDB (for long-term logging).
+    -   **Request Body**: `ChatMessageInput` (JSON with `session_id: str` and `user_message: str`).
+    -   **Response**: `ChatMessageOutput` (JSON with `session_id`, `user_message`, `ai_response`, and `retrieved_docs` which includes content and metadata of retrieved chunks).
+
+### Chat History Endpoints
+
+-   **`GET /api/v1/sessions/`**
+    -   **Description**: Lists previously recorded chat sessions, ordered by the most recent interaction.
+    -   **Query Parameters**:
+        -   `skip: int` (default 0): Number of sessions to skip for pagination.
+        -   `limit: int` (default 100, max 200): Maximum number of sessions to return.
+    -   **Response**: A list of `SessionDetailModel`, including `session_id`, `last_interaction_time`, and `total_messages` for each session.
+
+-   **`GET /api/v1/chat/{session_id}/history`**
+    -   **Description**: Retrieves the detailed chat history for a specific session, sorted by timestamp.
+    -   **Path Parameters**: `session_id: str`.
+    -   **Query Parameters**:
+        -   `skip: int` (default 0): Number of log entries to skip.
+        -   `limit: int` (default 100, max 1000): Maximum number of log entries to return.
+    -   **Response**: A list of `ChatLogEntryModel`, including `interaction_id`, `user_message`, `ai_response`, `timestamp`, `retrieved_doc_ids`, and `feedback` for each interaction.
+
+### Health Check
+
+-   **`GET /api/v1/health`**
+    -   **Description**: Performs a health check of the application and its connected services (MongoDB, Redis, OpenAI, Pinecone).
+    -   **Response**: `HealthStatus` (JSON indicating the status of each component).
+
 
 ## Project Structure
 
