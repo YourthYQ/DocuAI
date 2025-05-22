@@ -3,6 +3,7 @@ fastapi>=0.100.0,<0.111.0
 uvicorn[standard]>=0.20.0,<0.25.0
 pydantic>=2.0.0,<3.0.0
 pydantic-settings>=2.0.0,<3.0.0 # For loading .env files and settings management
+python-multipart>=0.0.5,<0.0.10 # For FastAPI file uploads
 
 # Database Clients
 pymongo>=4.0.0,<5.0.0 # For MongoDB
@@ -19,8 +20,16 @@ langchain>=0.1.16,<0.2.0
 langchain-openai>=0.1.3,<0.2.0
 # Pinecone integration for vector stores
 langchain-pinecone>=0.1.0,<0.2.0
-# Community components (e.g., RedisChatMessageHistory, other loaders/tools)
+# Community components (e.g., RedisChatMessageHistory, document loaders, text splitters)
 langchain-community>=0.0.32,<0.1.0
+# Tokenizer often used by LangChain, especially for text splitting and cost estimation
+tiktoken>=0.5.0,<0.7.0
+
+
+# Document Processing
+pdfminer.six>=20221105,<20240101 # For PDF text extraction
+# Other document format libraries can be added here if needed e.g. python-docx, beautifulsoup4 (for HTML)
+
 
 # Utilities
 python-dotenv>=1.0.0,<2.0.0 # For loading .env files, e.g. by docker-compose or utility scripts
@@ -29,9 +38,8 @@ python-dotenv>=1.0.0,<2.0.0 # For loading .env files, e.g. by docker-compose or 
 pytest>=7.0.0,<8.0.0
 httpx>=0.24.0,<0.28.0 # For async testing with FastAPI TestClient
 
-# Note: Removed tiktoken, chromadb, pypdf, python-docx, unstructured, python-multipart
-# as they are not directly imported or used in the current 'app' module code.
-# tiktoken might be needed by langchain-openai implicitly for token counting,
-# but it's usually installed as a dependency of langchain or langchain-openai.
-# If ModuleNotFoundError for tiktoken occurs, it should be added explicitly.
-# For now, assuming it's handled by transitive dependencies.
+# Note: Removed chromadb, pypdf, python-docx, unstructured
+# as they are not directly imported or used in the current 'app' module code,
+# or specific replacements are being added (e.g. pdfminer.six).
+# pypdf and python-docx might be re-added if LangChain's PyPDFLoader/Docx2txtLoader are preferred over pdfminer.six
+# or if direct use is needed. For now, focusing on pdfminer.six for PDF.

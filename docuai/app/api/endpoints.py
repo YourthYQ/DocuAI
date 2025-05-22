@@ -2,19 +2,41 @@ from fastapi import APIRouter, HTTPException, Body, Depends
 from typing import List, Optional
 
 from .models import (
+from fastapi import APIRouter, HTTPException, Body, Depends, UploadFile, File
+import shutil
+import uuid
+import os
+from typing import List, Optional
+
+from .models import (
+from .models import (
     DocumentInput, DocumentOutput, DocumentMinimalOutput,
-    ChatMessageInput, ChatMessageOutput, RetrievedDocInfo, HealthStatus
+    ChatMessageInput, ChatMessageOutput, RetrievedDocInfo, HealthStatus,
+    FileUploadResponse, ChatLogEntryModel # Added ChatLogEntryModel
 )
 from app.core.config import settings
 from app.data import storage as mongo_storage
-# vector_retriever is still needed for document upsert and index management via its LangChain compatible functions
 from app.retrieval import vector_retriever
 from app.services import conversation_manager as cm
-from app.llm.rag_chain import invoke_rag_chain # New RAG chain
-# from langchain_core.documents import Document as LangchainDocument # For type hinting, if needed
+from app.llm.rag_chain import invoke_rag_chain
+# Import add_chat_log_entry
+from app.data.storage import add_chat_log_entry
+from app.services.document_processor import (
+    extract_text_from_pdf,
+    extract_text_from_txt,
+    split_text_into_chunks
+)
+# Import for new endpoints
+from fastapi import Path, Query
+from app.data.storage import list_chat_sessions, get_chat_logs_for_session
+from .models import SessionDetailModel # ChatLogEntryModel already imported
+
 
 # --- Router Initialization ---
 router = APIRouter()
+
+TEMP_UPLOADS_DIR = "temp_uploads" # Ensure this directory exists and is in .gitignore
+os.makedirs(TEMP_UPLOADS_DIR, exist_ok=True)
 
 # Note: The Health Check endpoint might need adjustments based on how clients (OpenAI, Pinecone)
 # are now initialized or accessed, especially if the old global clients in vector_retriever
@@ -206,7 +228,33 @@ async def chat_endpoint(
     # but it was refactored to accept strings (user_message, ai_message) and convert them internally.
     # So, this should still work.
     if not cm.add_message_to_history(session_id, user_message, ai_response_text):
-        print(f"Warning: Failed to save message to history for session {session_id}.")
+        print(f"Warning: Failed to save message to Redis history for session {session_id}.")
+
+    # 3. Persist chat log to MongoDB
+    try:
+        retrieved_doc_ids_list = [
+            doc.doc_id for doc in retrieved_docs_output if doc.doc_id is not None
+        ]
+        
+        chat_log_data = ChatLogEntryModel(
+            session_id=session_id, # from chat_input
+            user_message=user_message, # from chat_input
+            ai_response=ai_response_text,
+            retrieved_doc_ids=retrieved_doc_ids_list if retrieved_doc_ids_list else None
+            # timestamp and interaction_id will use Pydantic model defaults
+        )
+        
+        # Use .model_dump() for Pydantic v2 (instead of .dict())
+        if not add_chat_log_entry(chat_log_data.model_dump()):
+            print(f"Warning: Failed to save chat log to MongoDB for session {session_id}, interaction {chat_log_data.interaction_id}.")
+        else:
+            print(f"Successfully saved chat log to MongoDB for interaction {chat_log_data.interaction_id}.")
+            
+    except Exception as e:
+        # Catch any unexpected errors during chat log saving & print a warning
+        # This ensures that chat log saving failure does not break the chat response to the user.
+        print(f"Warning: An unexpected error occurred while saving chat log to MongoDB for session {session_id}: {e}")
+        # import traceback; traceback.print_exc() # For more detailed debugging if needed
 
     return ChatMessageOutput(
         session_id=session_id,
@@ -242,3 +290,175 @@ async def get_document_endpoint(
         content=document_data.get("content"),
         metadata=document_data.get("metadata", {})
     )
+
+
+@router.post("/documents/upload_file/", response_model=FileUploadResponse, tags=["Documents"])
+async def upload_document_file(file: UploadFile = File(...)):
+    """
+    Handles file uploads (PDF or TXT), extracts text, chunks it, and upserts embeddings.
+    """
+    # Ensure temp_uploads directory exists (though done at module level, good to double check if needed)
+    # os.makedirs(TEMP_UPLOADS_DIR, exist_ok=True) 
+
+    temp_file_path = os.path.join(TEMP_UPLOADS_DIR, f"{uuid.uuid4()}_{file.filename}")
+
+    try:
+        # 1. Save Uploaded File Temporarily
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        print(f"File '{file.filename}' saved temporarily to '{temp_file_path}'")
+
+        # 2. Determine File Type and Extract Text
+        extracted_text: str
+        file_extension = os.path.splitext(file.filename)[1].lower()
+
+        if file_extension == ".pdf":
+            extracted_text = extract_text_from_pdf(temp_file_path)
+        elif file_extension == ".txt":
+            extracted_text = extract_text_from_txt(temp_file_path)
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type: '{file_extension}'. Supported types are .pdf and .txt."
+            )
+        
+        if not extracted_text or extracted_text.isspace():
+            return FileUploadResponse(
+                filename=file.filename,
+                message="No text content found in the document or document is empty.",
+                total_chunks_processed=0,
+                document_id=None
+            )
+
+        # 3. Chunk Text
+        # Using default chunk_size and chunk_overlap from document_processor for now
+        text_chunks = split_text_into_chunks(extracted_text)
+        if not text_chunks:
+            return FileUploadResponse(
+                filename=file.filename,
+                message="Text extracted but resulted in no processable chunks.",
+                total_chunks_processed=0,
+                document_id=None
+            )
+
+        # 4. Process and Upsert Chunks
+        uploaded_doc_id = f"file_{uuid.uuid4()}" # Unique ID for the entire uploaded document
+        successfully_processed_chunks = 0
+
+        for i, chunk_content in enumerate(text_chunks):
+            chunk_id = f"{uploaded_doc_id}_chunk_{i}"
+            chunk_metadata = {
+                "original_filename": file.filename,
+                "uploaded_doc_id": uploaded_doc_id,
+                "chunk_number": i,
+                "total_chunks": len(text_chunks)
+                # Add any other document-level metadata if available/needed
+            }
+            
+            # Upsert using the LangChain compatible function in vector_retriever
+            success = vector_retriever.upsert_document_embedding(
+                doc_id=chunk_id,
+                content=chunk_content,
+                metadata=chunk_metadata
+            )
+            if success:
+                successfully_processed_chunks += 1
+            else:
+                # Log this failure for monitoring, but continue processing other chunks
+                print(f"Warning: Failed to upsert chunk {chunk_id} for document {uploaded_doc_id} ('{file.filename}').")
+
+        if successfully_processed_chunks == 0 and text_chunks:
+             # This means all chunk upserts failed
+            raise HTTPException(
+                status_code=500,
+                detail=f"Extracted {len(text_chunks)} chunks from '{file.filename}', but failed to process any of them for vector storage."
+            )
+
+        return FileUploadResponse(
+            filename=file.filename,
+            message=f"Successfully processed '{file.filename}'. Extracted {len(text_chunks)} chunks, {successfully_processed_chunks} processed and sent for embedding.",
+            total_chunks_processed=successfully_processed_chunks,
+            document_id=uploaded_doc_id
+        )
+
+    except FileNotFoundError as e:
+        print(f"Error during file upload processing: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException as e: # Re-raise HTTPExceptions
+        raise e
+    except Exception as e:
+        print(f"Unexpected error during file upload of '{file.filename}': {e}")
+        # Log the full error for debugging: import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while processing file '{file.filename}': {str(e)}")
+    finally:
+        # 5. Cleanup: Delete the temporary uploaded file
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                print(f"Temporary file '{temp_file_path}' deleted successfully.")
+            except Exception as e_clean:
+                print(f"Error deleting temporary file '{temp_file_path}': {e_clean}")
+
+# --- Chat Log and Session Endpoints ---
+
+@router.get("/sessions/", response_model=List[SessionDetailModel], tags=["Chat History"])
+async def get_list_of_chat_sessions(
+    skip: int = Query(0, ge=0, description="Number of sessions to skip (for pagination)."),
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of sessions to return.")
+):
+    """
+    Retrieves a list of chat sessions, ordered by the most recent interaction.
+    Each session entry includes the session ID, the time of the last interaction,
+    and the total number of messages in that session.
+    """
+    try:
+        # Ensure MongoDB is connected (if not using Depends for every route)
+        if mongo_storage.db is None:
+            mongo_storage.connect_to_db()
+
+        sessions_data = mongo_storage.list_chat_sessions(limit=limit, offset=skip)
+        
+        # FastAPI will automatically convert dicts to Pydantic models if keys match.
+        # If explicit conversion is needed (e.g., for data transformation or validation):
+        # return [SessionDetailModel(**session_dict) for session_dict in sessions_data]
+        return sessions_data
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=f"Database connection error: {e}")
+    except Exception as e:
+        print(f"Error listing chat sessions: {e}")
+        # import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An error occurred while listing chat sessions: {str(e)}")
+
+
+@router.get("/chat/{session_id}/history", response_model=List[ChatLogEntryModel], tags=["Chat History"])
+async def get_session_chat_history(
+    session_id: str = Path(..., description="The ID of the chat session to retrieve history for."),
+    skip: int = Query(0, ge=0, description="Number of log entries to skip (for pagination)."),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of log entries to return.")
+):
+    """
+    Retrieves the chat history for a specific session_id.
+    Logs are returned sorted by timestamp in ascending order.
+    """
+    try:
+        # Ensure MongoDB is connected
+        if mongo_storage.db is None:
+            mongo_storage.connect_to_db()
+            
+        logs_data = mongo_storage.get_chat_logs_for_session(session_id=session_id, limit=limit, offset=skip)
+        
+        if not logs_data and skip == 0: # Check if session_id might be invalid or just has no logs
+            # Optionally, one could try to verify if the session_id has ever existed
+            # by checking if list_chat_sessions with a filter for this session_id returns anything.
+            # For now, an empty list is a valid response for a session with no (more) logs.
+            # If we wanted to return 404 for truly non-existent sessions, more logic would be needed.
+            print(f"No chat logs found for session '{session_id}' (limit: {limit}, skip: {skip}). Returning empty list.")
+        
+        # FastAPI will automatically convert dicts to Pydantic models.
+        return logs_data
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=f"Database connection error: {e}")
+    except Exception as e:
+        print(f"Error retrieving chat history for session '{session_id}': {e}")
+        # import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An error occurred while retrieving chat history for session '{session_id}': {str(e)}")
