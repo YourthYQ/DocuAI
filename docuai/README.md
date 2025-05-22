@@ -74,7 +74,76 @@ These methods, often combined, provide a powerful toolkit for guiding LLM behavi
 
 ## Getting Started
 
-(Instructions will be added once the initial setup is complete)
+This guide will walk you through setting up and running the DocuAI application locally using Docker and Docker Compose.
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed on your system:
+-   **Git**: For cloning the repository.
+-   **Docker**: For containerizing the application and its services.
+-   **Docker Compose**: For orchestrating multi-container Docker applications (usually included with Docker Desktop).
+
+### Setup Steps
+
+1.  **Clone the Repository**:
+    First, clone the DocuAI repository to your local machine. If you know the repository URL, replace `<your-repository-url>` with it.
+    ```bash
+    git clone <your-repository-url> 
+    cd docuai 
+    ```
+    If you are working from a local copy already, navigate into the `docuai` project directory.
+
+2.  **Configure Environment Variables**:
+    The application requires API keys and other configurations to be set up in an environment file.
+    -   Create a `.env` file in the project root directory by copying the `env.example` file:
+        ```bash
+        cp env.example .env
+        ```
+    -   Open the newly created `.env` file with a text editor and fill in your actual API keys and specific configurations:
+        -   `OPENAI_API_KEY`: Your OpenAI API key. This is required for embedding generation and LLM responses.
+        -   `PINECONE_API_KEY`: Your Pinecone API key. This is required for connecting to your Pinecone vector database.
+        -   `PINECONE_ENVIRONMENT`: Your Pinecone index environment (e.g., `gcp-starter`, `us-west1-gcp`, `aws-starter`). You can find this in your Pinecone console under your index details. This is crucial for connecting to your Pinecone index.
+        -   `PINECONE_INDEX_NAME`: (Optional) Default is `docuai-index`. The application will attempt to create this index with the correct dimensions (1536 for OpenAI's `text-embedding-ada-002`) if it doesn't exist during startup.
+        -   `MONGO_URI`, `MONGO_DB_NAME`, `REDIS_HOST`, `REDIS_PORT`: These defaults are pre-configured for the Docker Compose setup (e.g., `MONGO_URI="mongodb://mongo:27017/docuai_db"`). Change these only if you are using external MongoDB or Redis instances not managed by this `docker-compose.yml`.
+        -   `DEFAULT_LLM_MODEL`: (Optional) Default is `gpt-4`. You can specify other compatible OpenAI models like `gpt-3.5-turbo` if preferred.
+
+3.  **Build and Run with Docker Compose**:
+    Once your `.env` file is configured, you can build and run the application and its services using Docker Compose.
+    ```bash
+    docker-compose up --build -d
+    ```
+    -   The `--build` flag ensures that Docker images are built (or rebuilt if changes are detected).
+    -   The `-d` flag runs the containers in detached mode (in the background). You can omit `-d` to see live logs from all services in your terminal.
+    This command will:
+    -   Build the Docker image for the DocuAI FastAPI application based on the `Dockerfile`.
+    -   Pull official images for MongoDB and Redis.
+    -   Start containers for the application, MongoDB, and Redis.
+    -   Set up networking between the containers so they can communicate.
+    -   Create named volumes for MongoDB and Redis to persist data across restarts.
+
+4.  **Verify the Application**:
+    After the containers are up and running (this might take a minute or two for the first build and for services to initialize), you can verify that the application is working:
+    -   Access the API documentation (Swagger UI) in your browser:
+        `http://localhost:8000/docs`
+    -   You can also check the alternative API documentation (ReDoc):
+        `http://localhost:8000/redoc`
+    -   Check the health of the application and its connected services:
+        `http://localhost:8000/api/v1/health`
+        This endpoint should return a JSON response indicating the status of MongoDB, Redis, OpenAI, and Pinecone connections.
+
+5.  **Using the API**:
+    Refer to the "API Reference" section in this README for details on how to interact with the available endpoints, such as uploading documents and chatting with the AI.
+
+6.  **Stopping the Application**:
+    To stop the application and all related services:
+    ```bash
+    docker-compose down
+    ```
+    -   This command will stop and remove the containers defined in `docker-compose.yml`.
+    -   To also remove the data volumes associated with MongoDB and Redis (for a completely clean restart, deleting all stored data), use:
+        ```bash
+        docker-compose down -v
+        ```
 
 ## API Reference
 
