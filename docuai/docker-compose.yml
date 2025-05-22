@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: . # Assumes Dockerfile is in the same directory as docker-compose.yml (project root)
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mounts the local 'app' directory to '/app/app' in the container for live reloading
+      # This allows changes in your local code to be reflected immediately in the running container
+      - ./app:/app/app
+    env_file:
+      - .env # Loads environment variables from a .env file in the project root
+    depends_on:
+      - mongo
+      - redis
+    # Environment variables needed by the application.
+    # These can be overridden by the .env file or system environment.
+    # For development, MONGO_URI and REDIS_HOST point to the service names.
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/docuai_db # Default, can be overridden by .env
+      - MONGO_DB_NAME=docuai_db                     # Default, can be overridden by .env
+      - REDIS_HOST=redis                            # Default, can be overridden by .env
+      - REDIS_PORT=6379                             # Default, can be overridden by .env
+      # OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME
+      # should be set in the .env file.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  mongo:
+    image: mongo:latest # Using official MongoDB image
+    ports:
+      - "27017:27017" # Maps container port 27017 to host port 27017
+    volumes:
+      - mongo_data:/data/db # Persists MongoDB data in a named volume
+    # Optional: Add environment variables for MongoDB user/pass if needed
+    # environment:
+    #   - MONGO_INITDB_ROOT_USERNAME=admin
+    #   - MONGO_INITDB_ROOT_PASSWORD=password
+
+  redis:
+    image: redis:latest # Using official Redis image
+    ports:
+      - "6379:6379" # Maps container port 6379 to host port 6379
+    volumes:
+      - redis_data:/data # Persists Redis data in a named volume
+
+volumes:
+  mongo_data: # Defines the named volume for MongoDB data
+    driver: local
+  redis_data: # Defines the named volume for Redis data
+    driver: local
+  # app_data was in the original, but not actively used by the app service directly for persistence.
+  # Keeping it commented out unless a specific use case arises (e.g. file uploads to a shared volume).
+  # app_data:
+  #   driver: local

@@ -1,0 +1,37 @@
+# Core FastAPI and Application
+fastapi>=0.100.0,<0.111.0
+uvicorn[standard]>=0.20.0,<0.25.0
+pydantic>=2.0.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0 # For loading .env files and settings management
+
+# Database Clients
+pymongo>=4.0.0,<5.0.0 # For MongoDB
+redis>=5.0.0,<6.0.0 # For Redis
+
+# AI and Vector Store Clients
+openai>=1.0.0,<2.0.0 # OpenAI client
+pinecone-client>=3.0.0,<4.0.0 # Pinecone client (v3.x)
+
+# LangChain Framework
+# Core LangChain package
+langchain>=0.1.16,<0.2.0
+# OpenAI specific integrations (LLMs, Embeddings)
+langchain-openai>=0.1.3,<0.2.0
+# Pinecone integration for vector stores
+langchain-pinecone>=0.1.0,<0.2.0
+# Community components (e.g., RedisChatMessageHistory, other loaders/tools)
+langchain-community>=0.0.32,<0.1.0
+
+# Utilities
+python-dotenv>=1.0.0,<2.0.0 # For loading .env files, e.g. by docker-compose or utility scripts
+
+# Testing (optional, but good to include)
+pytest>=7.0.0,<8.0.0
+httpx>=0.24.0,<0.28.0 # For async testing with FastAPI TestClient
+
+# Note: Removed tiktoken, chromadb, pypdf, python-docx, unstructured, python-multipart
+# as they are not directly imported or used in the current 'app' module code.
+# tiktoken might be needed by langchain-openai implicitly for token counting,
+# but it's usually installed as a dependency of langchain or langchain-openai.
+# If ModuleNotFoundError for tiktoken occurs, it should be added explicitly.
+# For now, assuming it's handled by transitive dependencies.
