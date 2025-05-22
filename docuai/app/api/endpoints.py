@@ -1,35 +1,34 @@
-from fastapi import APIRouter, HTTPException, Body, Depends
-from typing import List, Optional
-
-from .models import (
-from fastapi import APIRouter, HTTPException, Body, Depends, UploadFile, File
+import os
 import shutil
 import uuid
-import os
 from typing import List, Optional
 
-from .models import (
-from .models import (
-    DocumentInput, DocumentOutput, DocumentMinimalOutput,
-    ChatMessageInput, ChatMessageOutput, RetrievedDocInfo, HealthStatus,
-    FileUploadResponse, ChatLogEntryModel # Added ChatLogEntryModel
-)
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Path, Query, UploadFile
+
 from app.core.config import settings
 from app.data import storage as mongo_storage
+# Import add_chat_log_entry, list_chat_sessions, get_chat_logs_for_session directly
+from app.data.storage import add_chat_log_entry, list_chat_sessions, get_chat_logs_for_session
+from app.llm.rag_chain import invoke_rag_chain
 from app.retrieval import vector_retriever
 from app.services import conversation_manager as cm
-from app.llm.rag_chain import invoke_rag_chain
-# Import add_chat_log_entry
-from app.data.storage import add_chat_log_entry
 from app.services.document_processor import (
     extract_text_from_pdf,
     extract_text_from_txt,
     split_text_into_chunks
 )
-# Import for new endpoints
-from fastapi import Path, Query
-from app.data.storage import list_chat_sessions, get_chat_logs_for_session
-from .models import SessionDetailModel # ChatLogEntryModel already imported
+from .models import (
+    ChatLogEntryModel,
+    ChatMessageInput,
+    ChatMessageOutput,
+    DocumentInput,
+    DocumentMinimalOutput,
+    DocumentOutput,
+    FileUploadResponse,
+    HealthStatus,
+    RetrievedDocInfo,
+    SessionDetailModel
+)
 
 
 # --- Router Initialization ---
